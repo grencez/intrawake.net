@@ -1,0 +1,95 @@
+(name Configure DHCP server.)
+(hosts all)
+(tasks (())
+ (()
+  (name Configure IPv6 forwarding.)
+  (ansible.builtin.copy
+   (dest /etc/sysctl.conf)
+   (owner root) (group root) (mode a=r,u+w)
+   (content """
+net.ipv6.conf.default.forwarding=1
+net.ipv6.conf.all.forwarding=1
+""")))
+ (()
+  (name Start sysctl for IPv6 forwarding.)
+  (ansible.builtin.service
+   (name sysctl)
+   (enabled +true)
+   (state started)
+ ))
+
+ (()
+  (name Configure network interfaces.)
+  (register network_conf_task)
+  (ansible.builtin.copy
+   (dest /etc/network/interfaces)
+   (owner root) (group root) (mode a=r,u+w)
+   (content """
+auto lo
+iface lo inet loopback
+iface lo inet6 loopback
+
+auto eth0
+
+iface eth0 inet dhcp
+""")))
+
+ (()
+  (name Install DHCP client.)
+  (community.general.apk (name dhcpcd) (state present))
+ )
+ (()
+  (name Configure DHCP client.)
+  (register dhcpcd_conf_task)
+  (ansible.builtin.copy
+   (dest /etc/dhcpcd.conf)
+   (owner root) (group root) (mode a=r,u+w)
+   (content """
+ipv6rs
+ipv6ra_noautoconf
+
+interface eth0
+  ipv6only
+  ipv6rs
+  ia_na 1
+  ia_pd 2 eth1/0/80
+
+interface eth1
+  ipv6only
+""")))
+
+ ; Dnsmasq provides a DHCPv6 server.
+ ; We overwrite its config and start it when dhcpcd gets an IPv6 prefix.
+ (()
+  (name Install DHCP server)
+  (community.general.apk (name dnsmasq) (state present))
+ )
+ (()
+  (name Configure DHCP server)
+  (register dnsmasq_conf_task)
+  (ansible.builtin.copy
+   (dest /etc/dhcpcd.exit-hook)
+   (owner root) (group root) (mode a=r,u+w)
+   (content """
+if [ "${reason}" = "DELEGATED6" ]; then
+  prefix=$(echo "${new_delegated_dhcp6_prefix}" | sed -e 's_::1/.*__')
+  cat >/etc/dnsmasq.conf <<HERE
+interface=eth1
+dhcp-range=${prefix}::100,${prefix}::1ff,80,1h
+enable-ra
+HERE
+  rc-service dnsmasq restart
+fi
+""")))
+
+ (()
+  (name Restart networking if something changed.)
+  (when
+   dhcpcd_conf_task.changed or
+   dnsmasq_conf_task.changed)
+  (ansible.builtin.service
+   (name networking)
+   (enabled +true)
+   (state restarted)
+ ))
+)
