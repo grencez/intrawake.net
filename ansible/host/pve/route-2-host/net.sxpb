@@ -45,17 +45,15 @@ iface eth0 inet dhcp
    (dest /etc/dhcpcd.conf)
    (owner root) (group root) (mode a=r,u+w)
    (content """
-ipv6rs
+allowinterfaces eth0 eth1
+ipv6only
+noipv6rs
 ipv6ra_noautoconf
 
 interface eth0
-  ipv6only
   ipv6rs
   ia_na 1
   ia_pd 2 eth1/0/80
-
-interface eth1
-  ipv6only
 """)))
 
  ; Dnsmasq provides a DHCPv6 server.
